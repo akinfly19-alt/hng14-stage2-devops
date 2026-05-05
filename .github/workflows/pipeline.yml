@@ -1,0 +1,189 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main]
+
+env:
+  REGISTRY: localhost:5000
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install flake8
+      - run: flake8 api/main.py worker/worker.py --max-line-length=120
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: cd frontend && npm ci
+      - run: cd frontend && npx eslint app.js
+      - uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: api/Dockerfile
+      - uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: worker/Dockerfile
+      - uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: frontend/Dockerfile
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install fastapi==0.111.0 uvicorn==0.30.1 redis==5.0.4 httpx==0.27.0 pytest pytest-cov
+      - run: pytest --cov=api --cov-report=xml --cov-report=term-missing
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.xml
+
+  build:
+    name: Build and Push Images
+    runs-on: ubuntu-latest
+    needs: test
+    services:
+      registry:
+        image: registry:2
+        ports:
+          - 5000:5000
+    outputs:
+      sha: ${{ steps.sha.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set short SHA
+        id: sha
+        run: echo "sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+      - run: |
+          docker build -t $REGISTRY/api:${{ steps.sha.outputs.sha }} -t $REGISTRY/api:latest ./api
+          docker push $REGISTRY/api:${{ steps.sha.outputs.sha }}
+          docker push $REGISTRY/api:latest
+      - run: |
+          docker build -t $REGISTRY/worker:${{ steps.sha.outputs.sha }} -t $REGISTRY/worker:latest ./worker
+          docker push $REGISTRY/worker:${{ steps.sha.outputs.sha }}
+          docker push $REGISTRY/worker:latest
+      - run: |
+          docker build -t $REGISTRY/frontend:${{ steps.sha.outputs.sha }} -t $REGISTRY/frontend:latest ./frontend
+          docker push $REGISTRY/frontend:${{ steps.sha.outputs.sha }}
+          docker push $REGISTRY/frontend:latest
+      - run: docker save $REGISTRY/api:latest $REGISTRY/worker:latest $REGISTRY/frontend:latest | gzip > images.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: docker-images
+          path: images.tar.gz
+
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: docker-images
+      - run: docker load < images.tar.gz
+      - uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: localhost:5000/api:latest
+          format: sarif
+          output: trivy-api.sarif
+          exit-code: "1"
+          severity: CRITICAL
+      - uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: localhost:5000/worker:latest
+          format: sarif
+          output: trivy-worker.sarif
+          exit-code: "1"
+          severity: CRITICAL
+      - uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: localhost:5000/frontend:latest
+          format: sarif
+          output: trivy-frontend.sarif
+          exit-code: "1"
+          severity: CRITICAL
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: trivy-results
+          path: "*.sarif"
+
+  integration:
+    name: Integration Test
+    runs-on: ubuntu-latest
+    needs: security
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: docker-images
+      - run: docker load < images.tar.gz
+      - run: |
+          docker tag localhost:5000/api:latest api:latest
+          docker tag localhost:5000/worker:latest worker:latest
+          docker tag localhost:5000/frontend:latest frontend:latest
+      - run: |
+          cat > .env <<ENVEOF
+          REDIS_PASSWORD=testpassword123
+          APP_ENV=test
+          FRONTEND_PORT=3000
+          ENVEOF
+      - run: docker compose up -d --no-build
+      - name: Wait for frontend healthy
+        run: |
+          for i in $(seq 1 30); do
+            STATUS=$(docker inspect --format='{{.State.Health.Status}}' stage2-frontend-1 2>/dev/null || echo "starting")
+            echo "[${i}] frontend: $STATUS"
+            [ "$STATUS" = "healthy" ] && break
+            sleep 5
+          done
+          [ "$STATUS" = "healthy" ] || (docker compose logs && exit 1)
+      - name: Submit job and poll
+        run: |
+          set -e
+          JOB_RESPONSE=$(curl -sf -X POST http://localhost:3000/submit)
+          JOB_ID=$(echo "$JOB_RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin)['job_id'])")
+          echo "Submitted job: $JOB_ID"
+          for i in $(seq 1 15); do
+            STATUS_RESPONSE=$(curl -sf "http://localhost:3000/status/$JOB_ID")
+            STATUS=$(echo "$STATUS_RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin)['status'])")
+            echo "[${i}] Job status: $STATUS"
+            [ "$STATUS" = "completed" ] && break
+            sleep 2
+          done
+          if [ "$STATUS" != "completed" ]; then
+            echo "FAIL: Job did not complete. Final status: $STATUS"
+            exit 1
+          fi
+          echo "PASS: Job completed successfully."
+      - if: always()
+        run: docker compose down -v --remove-orphans
+
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+    needs: integration
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: docker-images
+      - run: docker load < images.tar.gz
+      - run: |
+          chmod +x scripts/rolling-deploy.sh
+          ./scripts/rolling-deploy.sh api localhost:5000/api:latest
