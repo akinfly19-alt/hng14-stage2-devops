@@ -59,12 +59,6 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: "6379"
       REDIS_PASSWORD: ${REDIS_PASSWORD}
-    healthcheck:
-      test: ["CMD", "python", "-c", "import redis, os; r=redis.Redis(host='redis', password=os.environ.get('REDIS_PASSWORD')); r.ping()"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-      start_period: 15s
     restart: unless-stopped
     deploy:
       resources:
@@ -77,10 +71,9 @@ services:
     networks:
       - internal
     ports:
-      - "${FRONTEND_PORT:-3000}:3000"
+      - "3000:3000"
     depends_on:
-      api:
-        condition: service_healthy
+      - api
     environment:
       API_URL: http://api:8000
       PORT: "3000"
