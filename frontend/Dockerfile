@@ -1,11 +1,9 @@
 # syntax=docker/dockerfile:1
-# hadolint ignore=DL3006
 FROM node:20-slim AS builder
 
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci --only=production
-
+RUN npm install --omit=dev
 
 FROM node:20-slim
 
