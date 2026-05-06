@@ -135,7 +135,11 @@ jobs:
         with:
           name: docker-images
       - run: docker load < images.tar.gz
-      - run: |
+      - name: Retag images to match docker compose expected names
+        run: |
+          docker tag localhost:5000/api:latest hng14-stage2-devops-api:latest
+          docker tag localhost:5000/worker:latest hng14-stage2-devops-worker:latest
+          docker tag localhost:5000/frontend:latest hng14-stage2-devops-frontend:latest
           docker tag localhost:5000/api:latest api:latest
           docker tag localhost:5000/worker:latest worker:latest
           docker tag localhost:5000/frontend:latest frontend:latest
