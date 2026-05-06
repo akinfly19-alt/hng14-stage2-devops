@@ -150,15 +150,17 @@ jobs:
           FRONTEND_PORT=3000
           ENVEOF
       - run: docker compose up -d --no-build
-      - name: Wait for frontend healthy
+      - name: Wait for stack to be ready
         run: |
-          echo "Waiting for frontend to become healthy..."
+          echo "Waiting 30s for all services to start..."
+          sleep 30
+          echo "Now polling frontend health..."
           for i in $(seq 1 40); do
             if curl -sf http://localhost:3000/health > /dev/null 2>&1; then
               echo "[${i}] Frontend is up!"
               exit 0
             fi
-            echo "[${i}] Not ready yet..."
+            echo "[${i}] Not ready yet, waiting 5s..."
             sleep 5
           done
           echo "Frontend never became ready. Dumping logs:"
@@ -170,15 +172,16 @@ jobs:
           JOB_RESPONSE=$(curl -sf -X POST http://localhost:3000/submit)
           JOB_ID=$(echo "$JOB_RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin)['job_id'])")
           echo "Submitted job: $JOB_ID"
-          for i in $(seq 1 15); do
+          for i in $(seq 1 20); do
             STATUS_RESPONSE=$(curl -sf "http://localhost:3000/status/$JOB_ID")
             STATUS=$(echo "$STATUS_RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin)['status'])")
             echo "[${i}] Job status: $STATUS"
             [ "$STATUS" = "completed" ] && break
-            sleep 2
+            sleep 3
           done
           if [ "$STATUS" != "completed" ]; then
             echo "FAIL: Job did not complete. Final status: $STATUS"
+            docker compose logs
             exit 1
           fi
           echo "PASS: Job completed successfully."
