@@ -135,7 +135,7 @@ jobs:
         with:
           name: docker-images
       - run: docker load < images.tar.gz
-      - name: Retag images to match docker compose expected names
+      - name: Retag images
         run: |
           docker tag localhost:5000/api:latest hng14-stage2-devops-api:latest
           docker tag localhost:5000/worker:latest hng14-stage2-devops-worker:latest
@@ -152,13 +152,18 @@ jobs:
       - run: docker compose up -d --no-build
       - name: Wait for frontend healthy
         run: |
-          for i in $(seq 1 30); do
-            STATUS=$(docker inspect --format='{{.State.Health.Status}}' $(docker compose ps -q frontend) 2>/dev/null || echo "starting")
-            echo "[${i}] frontend: $STATUS"
-            [ "$STATUS" = "healthy" ] && break
+          echo "Waiting for frontend to become healthy..."
+          for i in $(seq 1 40); do
+            if curl -sf http://localhost:3000/health > /dev/null 2>&1; then
+              echo "[${i}] Frontend is up!"
+              exit 0
+            fi
+            echo "[${i}] Not ready yet..."
             sleep 5
           done
-          [ "$STATUS" = "healthy" ] || (docker compose logs && exit 1)
+          echo "Frontend never became ready. Dumping logs:"
+          docker compose logs
+          exit 1
       - name: Submit job and poll
         run: |
           set -e
