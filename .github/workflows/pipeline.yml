@@ -167,12 +167,12 @@ jobs:
       - name: Submit job and poll
         run: |
           set -e
-echo "=== Container status ==="
-docker compose ps
-echo "=== API health ==="
-curl -s http://localhost:8000/health || echo "API not reachable on 8000"
-echo "=== Direct API job submit ==="
-curl -s -X POST http://localhost:8000/jobs
+        echo "=== Container status ==="
+        docker compose ps
+        echo "=== API health ==="
+        curl -s http://localhost:8000/health || echo "API not reachable on 8000"
+        echo "=== Direct API job submit ==="
+        curl -s -X POST http://localhost:8000/jobs
           JOB_RESPONSE=$(curl -s -X POST http://localhost:3000/submit)
           JOB_ID=$(echo "$JOB_RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin)['job_id'])")
           echo "Submitted job: $JOB_ID"
