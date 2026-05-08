@@ -143,8 +143,8 @@ jobs:
           docker tag localhost:5000/api:latest api:latest
           docker tag localhost:5000/worker:latest worker:latest
           docker tag localhost:5000/frontend:latest frontend:latest
-      - name: Write env file
-        run: printf 'REDIS_PASSWORD=testpassword123\nAPP_ENV=test\nFRONTEND_PORT=3000\n' > .env
+      - name:Write env file
+        run: printf 'REDIS_PASSWORD=testpassword123\nAPP_ENV=test\nFRONTEND_PORT=3000\nAPI_URL=http://api:8000\n' > .env
       - name: Start stack
         run: docker compose up -d --no-build
       - name: Wait for frontend
