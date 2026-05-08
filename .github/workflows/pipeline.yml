@@ -167,7 +167,7 @@ jobs:
       - name: Submit job and poll
         run: |
           set -e
-          JOB_RESPONSE=$(curl -sf -X POST http://localhost:3000/submit)
+          JOB_RESPONSE=$(curl -s -X POST http://localhost:3000/submit)
           JOB_ID=$(echo "$JOB_RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin)['job_id'])")
           echo "Submitted job: $JOB_ID"
           for i in $(seq 1 20); do
