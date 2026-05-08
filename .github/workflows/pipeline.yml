@@ -143,21 +143,17 @@ jobs:
           docker tag localhost:5000/api:latest api:latest
           docker tag localhost:5000/worker:latest worker:latest
           docker tag localhost:5000/frontend:latest frontend:latest
-      - name: Write .env file
-        run: |
-          printf 'REDIS_PASSWORD=testpassword123\nAPP_ENV=test\nFRONTEND_PORT=3000\n' > .env
-          cat .env
+      - name: Write env file
+        run: printf 'REDIS_PASSWORD=testpassword123\nAPP_ENV=test\nFRONTEND_PORT=3000\n' > .env
       - name: Start stack
         run: docker compose up -d --no-build
-      - name: Show running containers
-        run: docker compose ps
       - name: Wait for frontend
         run: |
-          echo "Waiting 45s for services to initialize..."
-          sleep 45
-          echo "Polling frontend on port 3000..."
+          echo "Waiting 30s for services to start..."
+          sleep 30
+          echo "Polling frontend..."
           for i in $(seq 1 30); do
-            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/health || echo "000")
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/ || echo "000")
             echo "[${i}] HTTP status: $HTTP_CODE"
             if [ "$HTTP_CODE" = "200" ]; then
               echo "Frontend is ready!"
@@ -165,7 +161,7 @@ jobs:
             fi
             sleep 5
           done
-          echo "Frontend not ready. Full logs:"
+          echo "Frontend not ready. Logs:"
           docker compose logs
           exit 1
       - name: Submit job and poll
